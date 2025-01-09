@@ -1,11 +1,14 @@
 import numpy as np
-from pdf2image import convert_from_path
 import cv2
 from classes import HorizontalLines, VerticalLines, WireHoriz, WireVert, WireJunctions
 from skimage.feature import peak_local_max, match_template
 from skimage.transform import probabilistic_hough_line, rotate
 from io_1 import importImage
 from tqdm import tqdm
+from copy import copy
+from typing import List
+import keras_ocr
+from keras_ocr import pipeline
 
 def junctionDetection(HorizWires, VertWires):
     """ Detects which wires intersect to form a wire junction.
@@ -369,14 +372,55 @@ def plotAll(img, junctions, HW, VW):
     img = plotJunctions(img, junctions)
     cv2.imwrite('output_image_with_wires.png', img)
 
-def removeLoops(HorizWires, VertWires):
-    pass
+def findStems(HorizWires: List[WireHoriz], VertWires: List[WireVert], margin: int):
+    HorizWires = HorizWires.copy()
+    VertWires = VertWires.copy()
+    stems = []
+    for vWire in VertWires:
+        start = vWire.start
+        end = vWire.end
+        for hWire in HorizWires:
+            if withinRange(hWire, start, end, margin):
+                stems.append(hWire)
+                HorizWires.remove(hWire)
+    
+    for hWire in HorizWires:
+        start = hWire.start
+        end = hWire.end
+        for vWire in VertWires:
+            if withinRange(vWire, start, end, margin):
+                stems.append(vWire)
+                VertWires.remove(vWire)
+    
+    return stems
 
+def withinRange(wire, start, end, margin):
+    y_range = range(start[0] - margin, end[0] + margin)
+    x_range = range(start[1] - margin, end[1] + margin)
+    if wire.start[0] in y_range or wire.end[0] in y_range:
+        if wire.start[1] in x_range or wire.end[1] in x_range:
+            return True
+    return False
+
+def plotStems(img, stems):
+    for wire in stems:
+        top, bottom, left, right = wire.line
+        cv2.line(img, (left, top), (right, bottom), (0, 255, 255), 5)
+    return img
+
+def getTextBoxes(img):
+    pipeline = keras_ocr.pipeline.Pipeline()
+    prediction = pipeline.recognize([image])
+    # annotated_image = keras_ocr.tools.drawBoxes(image=image, boxes=prediction[0], boxes_format="predictions")
+    # cv2.imwrite("annotated_sch.jpg", annotated_image)
+    return prediction[0]
 
 if __name__ == "__main__":
     image = importImage("output_page_2.png")
     HorizWires, VertWires = wireScanHough(image)
     # junctions = junctionDetection(HorizWires, VertWires)
     cv_image = cv2.imread("output_page_2.png")
-    img = plotWires(cv_image, HorizWires, VertWires)
+    stems = findStems(HorizWires, VertWires, margin=2)
+    img = plotStems(cv_image, stems)
+    # img = plotWires(cv_image, HorizWires, VertWires)
     cv2.imwrite('ok.png', img)
